@@ -1,7 +1,8 @@
-# Ambient Glow for Video Sites 🌟
+# Ambient Glow for Anime Sites 🌟
 
-A lightweight, high-performance browser extension that adds an immersive, real-time ambient back-glow behind HTML5 video players — perfect for anime sites, streaming services, and video platforms.
+A lightweight, high-performance browser extension that adds an immersive, real-time, colour-matched ambient light glow behind HTML5 video players — specially tuned for anime streaming sites and video platforms.
 
+![Version 1.2.0](https://img.shields.io/badge/Version-1.2.0-orange.svg)
 ![Manifest v3](https://img.shields.io/badge/Manifest-V3-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
@@ -9,14 +10,18 @@ A lightweight, high-performance browser extension that adds an immersive, real-t
 
 ## ✨ Features
 
-- **Real-Time Dynamic Lighting**: Dynamically samples video frames using low-overhead canvas sampling and projects a soft, diffused ambient glow around the player.
-- **Full Iframe & Fullscreen Support**: Works seamlessly inside cross-origin iframes (e.g. third-party anime/video players) as well as native fullscreen mode via message passing.
-- **Customizable Glow**:
-  - **Strength**: Adjust opacity/intensity (0.0 to 1.0).
-  - **Blur**: Fine-tune dispersion and softness (10px to 200px).
-  - **Size**: Control how far the ambient halo extends (1.0x to 2.5x).
-- **Per-Site Toggle**: Quickly disable or enable the glow on specific domains directly from the popup toolbar.
-- **Smooth Animations**: Hardware-accelerated CSS transforms and smooth interpolation for an immersive theater experience without stuttering.
+- **Real-Time Dynamic Lighting**: Dynamically samples video frames using low-overhead canvas downscaling and projects a soft, diffused ambient glow around the video player.
+- **Smart Anime Auto-Detection**: Intelligently scores and auto-detects anime/donghua streaming platforms via metadata, title, and site structure, while exempting educational/productivity platforms.
+- **Flexible Scope Modes**:
+  - `Anime sites only (auto-detect)`
+  - `Only sites I add` (Allowlist mode)
+  - `All sites`
+- **Instant Presets**: Switch instantly between **Subtle**, **Balanced**, **Cinematic**, and **Intense**.
+- **Dual-Layer Glow & Falloff**: Renders a wide, soft background aura combined with an inner tighter layer (`softSpread`) for seamless, natural light diffusion.
+- **Color Smoothing & Transitions**: Smooths frame-to-frame color changes (`smoothing`), preventing harsh lighting flashes during rapid cuts.
+- **Color Grading**: Custom **Saturation** and **Brightness** multipliers to match your display aesthetics.
+- **Performance Controls**: Choose resolution quality (Low 32px to Ultra 256px) and frame rate caps (15, 24, 30, or 60 fps) to balance GPU/battery usage.
+- **Iframe & Fullscreen Sync**: Background service worker relay (`background.js`) synchronizes active status with cross-origin embedded player iframes and native fullscreen modes.
 
 ---
 
@@ -45,23 +50,33 @@ Click the **Ambient Glow** icon in your browser toolbar to configure:
 | Setting | Description | Default |
 | :--- | :--- | :--- |
 | **Enabled** | Globally toggles ambient lighting on or off. | `true` |
-| **Strength** | Glow opacity/brightness. | `0.9` |
-| **Blur** | Radius of the Gaussian blur filter. | `80px` |
-| **Size** | Scale multiplier of the back-glow canvas. | `1.5x` |
-| **Disable on site** | Blacklists current domain from rendering glow. | Active site |
+| **Where to run** | Select between auto anime detection, custom allowlist, or all sites. | `auto` |
+| **Presets** | Quick presets: `Subtle`, `Balanced`, `Cinematic`, `Intense`. | `Balanced` |
+| **Strength** | Overall glow intensity and opacity. | `0.9` |
+| **Blur** | Gaussian blur radius in pixels (10px - 250px). | `80px` |
+| **Spread size** | How far the ambient aura extends (1.0x - 3.0x). | `1.5x` |
+| **Soft falloff** | Second tighter layer for smoother falloff. | `0.5` |
+| **Colour smoothing** | Inter-frame temporal colour blending. | `0.5` |
+| **Saturation** | Color vibrancy factor (0.5x - 3.0x). | `1.4` |
+| **Brightness** | Luminance factor (0.5x - 1.5x). | `1.0` |
+| **Quality** | Video downscale canvas size (32, 64, 128, 256px). | `64 (Medium)` |
+| **Frame rate** | Frame sampling rate limit (15, 24, 30, 60 fps). | `30 fps` |
+| **Enable/Disable on site**| Quickly whitelist or blacklist current website domain. | Contextual |
 
 ---
 
 ## 📁 Project Structure
 
 ```text
-ambient-anime-extension/
+Ambient_Anime_sites_GlowExtension/
 ├── manifest.json      # Extension manifest (v3)
-├── content.js         # Content script handling frame extraction, sync, & rendering
+├── background.js      # Service worker managing tab/session state across iframes
+├── content.js         # Content script handling video frame sampling & rendering
 ├── popup.html         # Settings UI popup
-├── popup.js           # Controls & chrome.storage synchronization logic
+├── popup.js           # Settings controls, presets, & storage synchronization logic
 ├── .gitignore         # Ignored files
-└── README.md          # Documentation
+├── README.md          # Project documentation
+└── README.txt         # Quick installation notes
 ```
 
 ---

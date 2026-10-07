@@ -4,35 +4,62 @@
 <meta charset="utf-8">
 <style>
   :root { color-scheme: light dark; }
-  body { font: 13px system-ui, sans-serif; width: 260px; margin: 0; padding: 14px; }
-  h1 { font-size: 15px; margin: 0 0 12px; }
-  .row { margin-bottom: 12px; }
-  label { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  body { font: 13px system-ui, sans-serif; width: 300px; margin: 0; padding: 14px; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 14px 0 8px; }
+  .row { margin-bottom: 10px; }
+  label { display: flex; justify-content: space-between; margin-bottom: 3px; }
+  label span:last-child { opacity: .65; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; }
-  button { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #8884; cursor: pointer; }
+  select { width: 100%; padding: 4px; }
+  button { padding: 7px; border-radius: 6px; border: 1px solid #8884; cursor: pointer; background: transparent; color: inherit; }
+  .presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .presets button { font-size: 12px; padding: 6px 2px; }
+  .full { width: 100%; margin-top: 6px; }
   .toggle { display: flex; justify-content: space-between; align-items: center; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #status { font-size: 12px; margin-top: 6px; opacity: .8; }
   #host { opacity: .6; font-size: 11px; margin-top: 8px; text-align: center; word-break: break-all; }
 </style>
 </head>
 <body>
   <h1>Ambient Glow</h1>
-  <div class="row toggle">
-    <span>Enabled</span>
-    <input type="checkbox" id="enabled">
+  <div class="toggle row"><span>Enabled</span><input type="checkbox" id="enabled"></div>
+
+  <h2>Where to run</h2>
+  <select id="mode">
+    <option value="auto">Anime sites only (auto-detect)</option>
+    <option value="allowlist">Only sites I add</option>
+    <option value="all">All sites</option>
+  </select>
+  <div id="status"></div>
+
+  <h2>Presets</h2>
+  <div class="presets" id="presets"></div>
+
+  <h2>Glow</h2>
+  <div id="sliders"></div>
+
+  <h2>Performance</h2>
+  <div class="two">
+    <div><label><span>Quality</span></label>
+      <select id="quality">
+        <option value="32">Low</option>
+        <option value="64">Medium</option>
+        <option value="128">High</option>
+        <option value="256">Ultra</option>
+      </select></div>
+    <div><label><span>Frame rate</span></label>
+      <select id="fps">
+        <option value="15">15 fps</option>
+        <option value="24">24 fps</option>
+        <option value="30">30 fps</option>
+        <option value="60">60 fps</option>
+      </select></div>
   </div>
-  <div class="row">
-    <label>Strength <span id="strengthV"></span></label>
-    <input type="range" id="strength" min="0" max="1" step="0.05">
-  </div>
-  <div class="row">
-    <label>Blur <span id="blurV"></span></label>
-    <input type="range" id="blur" min="10" max="200" step="1">
-  </div>
-  <div class="row">
-    <label>Size <span id="sizeV"></span></label>
-    <input type="range" id="size" min="1" max="2.5" step="0.01">
-  </div>
-  <button id="site">Disable on this site</button>
+
+  <button class="full" id="site">Enable on this site</button>
+  <button class="full" id="reset">Reset to defaults</button>
   <div id="host"></div>
   <script src="popup.js"></script>
 </body>

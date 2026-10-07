@@ -1,18 +1,98 @@
 (() => {
   const IS_TOP = window.top === window;
   const MSG = "__ambientGlow";
-  const DEFAULTS = { enabled: true, strength: 0.9, blur: 80, size: 1.5, disabledSites: [] };
+  const DEFAULTS = {
+    enabled: true,
+    strength: 0.9,     // overall glow opacity
+    blur: 80,          // blur radius in px
+    size: 1.5,         // how far the glow spreads
+    softSpread: 0.5,   // second, tighter layer for a smoother falloff (0 = off)
+    smoothing: 0.5,    // colour smoothing between frames (0 = none)
+    saturation: 1.4,
+    brightness: 1,
+    quality: 64,       // source resolution (canvas width)
+    fps: 30,
+    mode: "auto",        // "auto" = anime sites only, "allowlist" = only sites you add, "all" = everywhere
+    allowedSites: [],    // sites you added manually
+    disabledSites: [],   // sites you turned off (always wins)
+  };
   let settings = { ...DEFAULTS };
-  const MIN_W = 200, MIN_H = 100, MIN_INTERVAL = 33;
+  const MIN_W = 200, MIN_H = 100;
+  const minInterval = () => 1000 / (settings.fps || 30) - 4;
   const rid = () => Math.random().toString(36).slice(2);
+  const heightFor = (w, v) => Math.max(9, Math.round((w * v.videoHeight) / v.videoWidth));
 
-  const topHost = (() => {
+  // ---------- Site detection: decide whether the glow should run on this page ----------
+  const normHost = (h) => (h || "").toLowerCase().replace(/^www\./, "");
+  const hostMatches = (list, host) => list.some((e) => host === e || host.endsWith("." + e));
+  const ownHost = normHost(location.hostname);
+  const ancestorHost = (() => {
     try {
-      const o = location.ancestorOrigins && location.ancestorOrigins[0];
-      return new URL(o || location.href).hostname;
-    } catch (e) { return location.hostname; }
+      const a = location.ancestorOrigins;
+      return a && a.length ? normHost(new URL(a[a.length - 1]).hostname) : null;
+    } catch (e) { return null; }
   })();
-  const isActive = () => settings.enabled && !settings.disabledSites.includes(topHost);
+
+  // Sites that are never auto-enabled (general video and learning platforms).
+  const NEVER_AUTO = [
+    "youtube.com", "youtu.be", "vimeo.com", "coursera.org", "udemy.com", "khanacademy.org",
+    "edx.org", "linkedin.com", "zoom.us", "teams.microsoft.com", "meet.google.com",
+    "classroom.google.com",
+  ];
+  const EDU_HOST = /(\.edu(\.[a-z]{2})?$|\.ac\.[a-z]{2}$|moodle|instructure|blackboard|(^|[.-])lms([.-]|$))/;
+
+  function looksLikeAnime() {
+    if (hostMatches(NEVER_AUTO, ownHost) || EDU_HOST.test(ownHost)) return false;
+    const meta = (n) => {
+      const el = document.querySelector(`meta[name="${n}"],meta[property="${n}"]`);
+      return el && el.content ? el.content.toLowerCase() : "";
+    };
+    const word = /\b(anime|donghua)\b/;
+    const title = (document.title || "").toLowerCase();
+    let score = 0;
+    if (/anime|donghua/.test(ownHost)) score += 3;
+    if (word.test(meta("og:site_name"))) score += 2;
+    if (word.test(title)) score += 1;
+    if (word.test(meta("keywords") + " " + meta("description") + " " + meta("og:description"))) score += 1;
+    if (/anime|donghua/.test(location.pathname.toLowerCase())) score += 1;
+    if (/\b(subbed|dubbed|english sub|eng sub)\b/.test(title)) score += 1;
+    if (/episode\s*\d+/.test(title)) score += 1;
+    if (/^video\.(episode|tv_show)/.test(meta("og:type"))) score += 1;
+    return score >= 2;
+  }
+
+  let siteStatus = { active: false, reason: "starting" };
+  let pageActive = false;
+  const isActive = () => pageActive;
+
+  function decide() {
+    if (!settings.enabled) return { active: false, reason: "extension is off" };
+    if (hostMatches(settings.disabledSites, ownHost)) return { active: false, reason: "disabled by you" };
+    if (settings.mode === "all") return { active: true, reason: "all-sites mode" };
+    if (hostMatches(settings.allowedSites, ownHost)) return { active: true, reason: "added by you" };
+    if (settings.mode === "auto" && looksLikeAnime()) return { active: true, reason: "anime site detected" };
+    return { active: false, reason: settings.mode === "auto" ? "not detected as an anime site" : "not in your list" };
+  }
+
+  let lastReport = "";
+  function refreshStatus() {
+    if (!IS_TOP) return;
+    siteStatus = decide();
+    pageActive = siteStatus.active;
+    const sig = ownHost + "|" + siteStatus.active;
+    if (sig !== lastReport) {
+      lastReport = sig;
+      try { chrome.runtime.sendMessage({ type: "report", host: ownHost, active: siteStatus.active }); } catch (e) {}
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "getStatus" && IS_TOP) {
+      sendResponse(siteStatus);
+    } else if (msg.type === "status" && !IS_TOP) {
+      if (!ancestorHost || msg.host === ancestorHost) { pageActive = msg.active; scan(); }
+    }
+  });
   const postUp = (msg, transfer) => {
     try { window.parent.postMessage(msg, "*", transfer || []); } catch (e) {}
   };
@@ -38,17 +118,46 @@
       if (this.root.parentNode !== host) host.appendChild(this.root);
     },
 
+    makeCanvas() {
+      const c = document.createElement("canvas");
+      c.width = 64; c.height = 36;
+      Object.assign(c.style, { position: "absolute", pointerEvents: "none" });
+      return c;
+    },
+
     create(id) {
       const wrap = document.createElement("div");
       Object.assign(wrap.style, { position: "absolute", inset: "0", pointerEvents: "none" });
-      const canvas = document.createElement("canvas");
-      canvas.width = 48; canvas.height = 27;
-      Object.assign(canvas.style, { position: "absolute", pointerEvents: "none" });
-      wrap.appendChild(canvas);
+      const far = this.makeCanvas();   // wide, soft glow
+      const near = this.makeCanvas();  // tighter glow for smoother falloff
+      wrap.appendChild(far);
+      wrap.appendChild(near);
       this.root.appendChild(wrap);
-      const it = { wrap, canvas, ctx: canvas.getContext("2d", { alpha: false }), inner: null, iframeEl: null };
+      const it = {
+        wrap, far, near,
+        fctx: far.getContext("2d", { alpha: false }),
+        nctx: near.getContext("2d", { alpha: false }),
+        inner: null, iframeEl: null, fresh: true,
+      };
       this.items.set(id, it);
       return it;
+    },
+
+    paint(it, src, w, h, hard) {
+      if (it.far.width !== w || it.far.height !== h) {
+        it.far.width = w; it.far.height = h;
+        it.near.width = w; it.near.height = h;
+        it.fresh = true;
+      }
+      const ctx = it.fctx;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      // Blending each frame over the previous one gives smooth colour transitions.
+      ctx.globalAlpha = it.fresh || hard ? 1 : Math.max(0.06, 1 - settings.smoothing);
+      try { ctx.drawImage(src, 0, 0, w, h); } catch (e) {}
+      ctx.globalAlpha = 1;
+      it.fresh = false;
+      if (settings.softSpread > 0) it.nctx.drawImage(it.far, 0, 0);
     },
 
     set(id, d) {
@@ -56,17 +165,11 @@
       const it = this.items.get(id) || this.create(id);
       it.inner = d.inner;
       it.iframeEl = d.iframeEl || null;
-      const cv = it.canvas;
       if (d.video) {
-        const v = d.video;
-        const h = Math.max(9, Math.round((48 * v.videoHeight) / v.videoWidth));
-        if (cv.width !== 48 || cv.height !== h) { cv.width = 48; cv.height = h; }
-        try { it.ctx.drawImage(v, 0, 0, cv.width, cv.height); } catch (e) {}
+        const w = settings.quality;
+        this.paint(it, d.video, w, heightFor(w, d.video), d.hard);
       } else if (d.bitmap) {
-        if (cv.width !== d.bitmap.width || cv.height !== d.bitmap.height) {
-          cv.width = d.bitmap.width; cv.height = d.bitmap.height;
-        }
-        it.ctx.drawImage(d.bitmap, 0, 0);
+        this.paint(it, d.bitmap, d.bitmap.width, d.bitmap.height, d.hard);
         if (d.bitmap.close) d.bitmap.close();
       }
       this.layout(id, it);
@@ -92,12 +195,23 @@
       it.wrap.style.clipPath =
         `polygon(evenodd,0 0,100% 0,100% 100%,0 100%,0 0,` +
         `${r.x}px ${r.y}px,${r.x}px ${y2}px,${x2}px ${y2}px,${x2}px ${r.y}px,${r.x}px ${r.y}px)`;
-      const s = it.canvas.style;
-      s.left = r.x + "px"; s.top = r.y + "px";
-      s.width = r.w + "px"; s.height = r.h + "px";
-      s.transform = `scale(${settings.size})`;
-      s.filter = `blur(${settings.blur}px) saturate(1.4)`;
-      s.opacity = String(settings.strength);
+
+      const color = `saturate(${settings.saturation}) brightness(${settings.brightness})`;
+      const place = (cv, blur, scale, opacity) => {
+        const s = cv.style;
+        s.left = r.x + "px"; s.top = r.y + "px";
+        s.width = r.w + "px"; s.height = r.h + "px";
+        s.transform = `scale(${scale})`;
+        s.filter = `blur(${blur}px) ${color}`;
+        s.opacity = String(opacity);
+      };
+      place(it.far, settings.blur, settings.size, settings.strength);
+      const soft = settings.softSpread > 0;
+      it.near.style.display = soft ? "block" : "none";
+      if (soft) {
+        place(it.near, settings.blur * 0.45, 1 + (settings.size - 1) * 0.45,
+          settings.strength * settings.softSpread);
+      }
     },
 
     layoutAll() { this.items.forEach((it, id) => this.layout(id, it)); },
@@ -138,7 +252,7 @@
     const f = findIframe(e.source);
     if (!f) return;
     if (canRender()) {
-      Renderer.set(m.id, { inner: m.rect, iframeEl: f, bitmap: m.bitmap });
+      Renderer.set(m.id, { inner: m.rect, iframeEl: f, bitmap: m.bitmap, hard: m.hard });
     } else {
       const b = f.getBoundingClientRect();
       const rect = {
@@ -146,7 +260,8 @@
         y: b.top + f.clientTop + m.rect.y,
         w: m.rect.w, h: m.rect.h,
       };
-      postUp({ [MSG]: 1, type: "frame", id: m.id, rect, bitmap: m.bitmap }, m.bitmap ? [m.bitmap] : []);
+      postUp({ [MSG]: 1, type: "frame", id: m.id, rect, hard: m.hard, bitmap: m.bitmap },
+        m.bitmap ? [m.bitmap] : []);
     }
   });
 
@@ -174,7 +289,7 @@
 
       this.onPlay = () => this.start();
       this.onPause = () => { this.stop(); this.draw(); };
-      this.onDraw = () => this.draw();
+      this.onCut = () => this.draw(true);
       this.onMove = () => {
         if (this.pending) return;
         this.pending = true;
@@ -183,14 +298,14 @@
       this.onFs = () => {
         if (!IS_TOP) Renderer.clear();
         if (Renderer.root) Renderer.ensureRoot();
-        this.draw();
+        this.draw(true);
       };
       this.onHide = () => this.hide();
 
       video.addEventListener("play", this.onPlay);
       video.addEventListener("playing", this.onPlay);
       video.addEventListener("pause", this.onPause);
-      ["seeked", "loadeddata", "loadedmetadata"].forEach((ev) => video.addEventListener(ev, this.onDraw));
+      ["seeked", "loadeddata", "loadedmetadata"].forEach((ev) => video.addEventListener(ev, this.onCut));
       window.addEventListener("scroll", this.onMove, true);
       window.addEventListener("resize", this.onMove);
       document.addEventListener("fullscreenchange", this.onFs);
@@ -200,11 +315,11 @@
       this.ro.observe(video);
       this.io = new IntersectionObserver((entries) => {
         this.inView = entries[0].isIntersecting;
-        if (this.inView) { this.draw(); this.start(); } else { this.stop(); this.hide(); }
+        if (this.inView) { this.draw(true); this.start(); } else { this.stop(); this.hide(); }
       });
       this.io.observe(video);
 
-      this.draw();
+      this.draw(true);
       this.start();
     }
 
@@ -214,7 +329,7 @@
       this.wasLocal = null;
     }
 
-    draw() {
+    draw(hard) {
       const v = this.video;
       if (!this.inView || v.readyState < 2 || !v.videoWidth) return;
       const b = v.getBoundingClientRect();
@@ -225,17 +340,18 @@
       if (this.wasLocal !== null && local !== this.wasLocal) {
         if (local) postUp({ [MSG]: 1, type: "remove", id: this.id });
         else Renderer.remove(this.id);
+        hard = true;
       }
       this.wasLocal = local;
 
       if (local) {
-        Renderer.set(this.id, { inner: rect, video: v });
+        Renderer.set(this.id, { inner: rect, video: v, hard });
       } else {
         if (this.busy) return;
         this.busy = true;
-        const h = Math.max(9, Math.round((48 * v.videoHeight) / v.videoWidth));
-        createImageBitmap(v, { resizeWidth: 48, resizeHeight: h })
-          .then((bmp) => postUp({ [MSG]: 1, type: "frame", id: this.id, rect, bitmap: bmp }, [bmp]))
+        const w = settings.quality;
+        createImageBitmap(v, { resizeWidth: w, resizeHeight: heightFor(w, v), resizeQuality: "high" })
+          .then((bmp) => postUp({ [MSG]: 1, type: "frame", id: this.id, rect, hard: !!hard, bitmap: bmp }, [bmp]))
           .catch(() => {})
           .finally(() => { this.busy = false; });
       }
@@ -243,7 +359,7 @@
 
     loop(now) {
       if (!this.running) return;
-      if (now - this.last >= MIN_INTERVAL) { this.last = now; this.draw(); }
+      if (now - this.last >= minInterval()) { this.last = now; this.draw(false); }
       this.schedule();
     }
 
@@ -273,7 +389,7 @@
       v.removeEventListener("play", this.onPlay);
       v.removeEventListener("playing", this.onPlay);
       v.removeEventListener("pause", this.onPause);
-      ["seeked", "loadeddata", "loadedmetadata"].forEach((ev) => v.removeEventListener(ev, this.onDraw));
+      ["seeked", "loadeddata", "loadedmetadata"].forEach((ev) => v.removeEventListener(ev, this.onCut));
       window.removeEventListener("scroll", this.onMove, true);
       window.removeEventListener("resize", this.onMove);
       document.removeEventListener("fullscreenchange", this.onFs);
@@ -295,17 +411,35 @@
   }
 
   let timer = null;
-  const debouncedScan = () => { clearTimeout(timer); timer = setTimeout(scan, 300); };
+  const debouncedScan = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (IS_TOP) refreshStatus(); scan(); }, 300);
+  };
 
-  chrome.storage.sync.get(DEFAULTS, (s) => {
+  chrome.storage.local.get(DEFAULTS, (s) => {
     settings = { ...DEFAULTS, ...s };
-    scan();
+    if (IS_TOP) {
+      refreshStatus();
+      scan();
+    } else {
+      // Embedded player: ask whether the top page is an active site.
+      chrome.runtime.sendMessage({ type: "query" }, (res) => {
+        void chrome.runtime.lastError;
+        if (res && res.active && (!ancestorHost || res.host === ancestorHost)) {
+          pageActive = true;
+          scan();
+        }
+      });
+    }
     new MutationObserver(debouncedScan).observe(document.documentElement, { childList: true, subtree: true });
   });
 
-  chrome.storage.onChanged.addListener((changes) => {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
     for (const k in changes) settings[k] = changes[k].newValue;
     Renderer.layoutAll();
+    if (IS_TOP) refreshStatus();
     scan();
+    glows.forEach((g) => g.draw(true)); // redraw so quality changes apply even when paused
   });
 })();
